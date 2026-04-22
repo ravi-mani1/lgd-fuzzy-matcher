@@ -102,6 +102,36 @@ class LGDMatcher:
         self.global_district_choices = list(self.global_district_norm_map.keys())
         logger.info("Indices ready | states=%d | districts=%d", len(self.state_df), len(self.district_df))
 
+    def list_states(self) -> list[dict]:
+        if self.state_df is None:
+            raise RuntimeError("Master data not loaded. Call load_master_from_csv/load_master_from_mysql first.")
+        out = (
+            self.state_df[["state_lgd_code", "state_name"]]
+            .dropna()
+            .astype(str)
+            .assign(
+                state_lgd_code=lambda d: d["state_lgd_code"].str.strip(),
+                state_name=lambda d: d["state_name"].str.strip(),
+            )
+        )
+        out = out[(out["state_lgd_code"] != "") & (out["state_name"] != "")]
+        out = out.drop_duplicates().sort_values(["state_name", "state_lgd_code"])
+        return out.to_dict(orient="records")
+
+    def list_districts(self, state_lgd_code: str) -> list[dict]:
+        if self.district_df is None:
+            raise RuntimeError("Master data not loaded. Call load_master_from_csv/load_master_from_mysql first.")
+        sc = "" if is_blank(state_lgd_code) else str(state_lgd_code).strip()
+        if not sc:
+            return []
+        df = self.district_df.copy()
+        df["state_lgd_code"] = df["state_lgd_code"].astype(str).str.strip()
+        df["district_lgd_code"] = df["district_lgd_code"].astype(str).str.strip()
+        df["district_name"] = df["district_name"].astype(str).str.strip()
+        df = df[(df["state_lgd_code"] == sc) & (df["district_lgd_code"] != "") & (df["district_name"] != "")]
+        df = df[["district_lgd_code", "district_name"]].drop_duplicates().sort_values(["district_name", "district_lgd_code"])
+        return df.to_dict(orient="records")
+
     def _status(self, score: float, exact: bool = False) -> str:
         if exact: return "EXACT"
         t = self.thresholds
@@ -117,6 +147,84 @@ class LGDMatcher:
             r = process.extractOne(query, choices, scorer=scorer, processor=None)
             if r: results.append((r[0], float(r[1])))
         return max(results, key=lambda x: x[1]) if results else (None, 0.0)
+
+    def _top_fuzzy(self, query: str, choices: list, limit: int = 5) -> list[tuple[str, float]]:
+        if not query or not choices or limit <= 0:
+            return []
+        scores: dict[str, float] = {}
+        for scorer in (fuzz.token_sort_ratio, fuzz.token_set_ratio):
+            for c, s, _ in process.extract(query, choices, scorer=scorer, processor=None, limit=limit):
+                s = float(s)
+                if c not in scores or s > scores[c]:
+                    scores[c] = s
+        return sorted(scores.items(), key=lambda x: x[1], reverse=True)[:limit]
+
+    def suggest_states(self, raw_state: str, limit: int = 5) -> list[dict]:
+        if is_blank(raw_state):
+            return []
+        norm = normalize_text(raw_state, self.stop_words)
+        if not norm:
+            return []
+        query = normalize_text(self.state_aliases.get(norm, norm), self.stop_words)
+        out = []
+        for choice, score in self._top_fuzzy(query, self.state_choices, limit=limit):
+            rec = self.state_norm_map.get(choice)
+            if not rec:
+                continue
+            out.append({
+                "state_lgd_code": rec["state_lgd_code"],
+                "state_name": rec["state_name"],
+                "score": round(score, 2),
+                "status": self._status(score),
+            })
+        return out
+
+    def suggest_districts(self, raw_district: str, state_lgd_code: str | None = None, limit: int = 5) -> list[dict]:
+        if is_blank(raw_district):
+            return []
+        norm = normalize_text(raw_district, self.stop_words)
+        if not norm:
+            return []
+        query = normalize_text(self.district_aliases.get(norm, norm), self.stop_words)
+        sc = "" if is_blank(state_lgd_code) else str(state_lgd_code).strip()
+        norm_map = self.district_norm_by_state.get(sc, {}) if sc else self.global_district_norm_map
+        choices = self.district_choices_by_state.get(sc, []) if sc else self.global_district_choices
+        global_mode = not bool(sc)
+
+        out = []
+        for choice, score in self._top_fuzzy(query, choices, limit=limit):
+            cand = norm_map.get(choice)
+            if cand is None:
+                continue
+            if global_mode:
+                for rec in cand:
+                    out.append({
+                        "district_lgd_code": rec["district_lgd_code"],
+                        "district_name": rec["district_name"],
+                        "state_lgd_code": rec.get("state_lgd_code"),
+                        "score": round(score, 2),
+                        "status": self._status(score),
+                    })
+            else:
+                out.append({
+                    "district_lgd_code": cand["district_lgd_code"],
+                    "district_name": cand["district_name"],
+                    "state_lgd_code": cand.get("state_lgd_code"),
+                    "score": round(score, 2),
+                    "status": self._status(score),
+                })
+
+        seen = set()
+        deduped = []
+        for r in sorted(out, key=lambda x: x["score"], reverse=True):
+            k = (r.get("state_lgd_code"), r.get("district_lgd_code"))
+            if k in seen:
+                continue
+            seen.add(k)
+            deduped.append(r)
+            if len(deduped) >= limit:
+                break
+        return deduped
 
     @lru_cache(maxsize=50000)
     def match_state(self, raw_state: str) -> dict:
@@ -189,6 +297,11 @@ class LGDMatcher:
                 return {"district_lgd_code": cand["district_lgd_code"], "district_name_corrected": cand["district_name"],
                         "district_score": 100.0, "district_status": "EXACT"}
             query = alias_norm
+
+        # If state is unknown, avoid "guessing" districts via fuzzy search.
+        # Use suggest_districts() to guide the user instead.
+        if global_mode:
+            return empty
 
         choice, score = self._best_fuzzy(query, choices)
         if choice is None or score < self.thresholds["low_confidence"]: return empty

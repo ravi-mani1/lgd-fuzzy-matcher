@@ -48,12 +48,192 @@ with st.sidebar:
     medium_t = st.slider("MEDIUM >= ", 60, 89, 75)
     low_t    = st.slider("LOW >= ",    40, 74, 60)
     sql_table = st.text_input("SQL Table Name", "target_table")
+    st.divider()
+    st.subheader("Quick options")
+    top_n = st.slider("Suggestions: top N", 1, 10, 5)
+    show_suggestions = st.checkbox("Show suggestions", value=True)
 
 
 st.title("🗺️ LGD Fuzzy Matching System")
 st.markdown("Map raw state/district names → **official LGD codes** with confidence scoring.")
 
-tab1, tab2, tab3 = st.tabs(["📤 Upload & Match", "📊 Results & Download", "📖 Help"])
+tab0, tab1, tab2, tab3 = st.tabs(["🔎 Quick Validate", "📤 Upload & Match", "📊 Results & Download", "📖 Help"])
+
+def load_matcher_from_sources() -> LGDMatcher | None:
+    try:
+        if state_up and dist_up:
+            sb, db = state_up.getvalue(), dist_up.getvalue()
+        elif use_local and os.path.exists("lgd_STATE.csv") and os.path.exists("DISTRICT_STATE.csv"):
+            sb, db = open("lgd_STATE.csv", "rb").read(), open("DISTRICT_STATE.csv", "rb").read()
+        else:
+            return None
+        m = get_matcher_from_bytes(sb, db)
+        m.thresholds.update({
+            "high_confidence": high_t,
+            "medium_confidence": medium_t,
+            "low_confidence": low_t,
+        })
+        return m
+    except Exception:
+        return None
+
+def split_csv_values(s: str) -> list[str]:
+    if s is None:
+        return []
+    parts = [p.strip() for p in str(s).split(",")]
+    return [p for p in parts if p]
+
+def build_rows(state_name: str, state_lgd: str, dist_name: str, dist_lgd: str) -> list[dict]:
+    a = split_csv_values(state_name)
+    b = split_csv_values(state_lgd)
+    c = split_csv_values(dist_name)
+    d = split_csv_values(dist_lgd)
+    n = max(len(a), len(b), len(c), len(d), 1)
+
+    def expand(lst: list[str]) -> list[str]:
+        if not lst:
+            return [""] * n
+        if len(lst) == 1 and n > 1:
+            return lst * n
+        if len(lst) < n:
+            return lst + [""] * (n - len(lst))
+        return lst[:n]
+
+    a, b, c, d = expand(a), expand(b), expand(c), expand(d)
+    rows = []
+    for i in range(n):
+        rows.append({
+            "id": str(i + 1),
+            "state_name_in": a[i],
+            "state_lgd_in": b[i],
+            "district_name_in": c[i],
+            "district_lgd_in": d[i],
+        })
+    return rows
+
+def state_from_lgd(matcher: LGDMatcher, state_lgd_code: str) -> dict | None:
+    if not state_lgd_code:
+        return None
+    df = matcher.state_df
+    if df is None:
+        return None
+    code = str(state_lgd_code).strip()
+    hit = df[df["state_lgd_code"].astype(str).str.strip() == code]
+    if hit.empty:
+        return None
+    r = hit.iloc[0]
+    return {"state_lgd_code": code, "state_name": str(r["state_name"]).strip()}
+
+def district_from_lgd(matcher: LGDMatcher, district_lgd_code: str, state_lgd_code: str | None = None) -> dict | None:
+    if not district_lgd_code:
+        return None
+    df = matcher.district_df
+    if df is None:
+        return None
+    dc = str(district_lgd_code).strip()
+    ddf = df.copy()
+    ddf["district_lgd_code"] = ddf["district_lgd_code"].astype(str).str.strip()
+    if state_lgd_code:
+        sc = str(state_lgd_code).strip()
+        ddf["state_lgd_code"] = ddf["state_lgd_code"].astype(str).str.strip()
+        hit = ddf[(ddf["district_lgd_code"] == dc) & (ddf["state_lgd_code"] == sc)]
+    else:
+        hit = ddf[ddf["district_lgd_code"] == dc]
+    if hit.empty:
+        return None
+    r = hit.iloc[0]
+    return {
+        "district_lgd_code": dc,
+        "district_name": str(r["district_name"]).strip(),
+        "state_lgd_code": str(r["state_lgd_code"]).strip(),
+    }
+
+with tab0:
+    st.subheader("Quick Validate")
+    st.caption("Fill any 1–4 fields. You can enter multiple values separated by commas.")
+
+    matcher = load_matcher_from_sources()
+    if matcher is None:
+        st.info("Upload master CSVs in the sidebar or enable 'Use local CSVs' to use Quick Validate.")
+    else:
+        c1, c2 = st.columns(2)
+        with c1:
+            q_state_name = st.text_input("State name (optional)", placeholder="e.g. UP, Delhi, uttaranchal")
+            q_dist_name = st.text_input("District name (optional)", placeholder="e.g. varansi, new delhi")
+        with c2:
+            q_state_lgd = st.text_input("State LGD code (optional)", placeholder="e.g. 9, 7")
+            q_dist_lgd = st.text_input("District LGD code (optional)", placeholder="e.g. 187, 141")
+
+        run_quick = st.button("Validate", type="primary")
+        if run_quick:
+            rows = build_rows(q_state_name, q_state_lgd, q_dist_name, q_dist_lgd)
+            outputs = []
+            sugg_rows = []
+
+            for r in rows:
+                # Resolve from LGD codes if provided (these are exact validations)
+                state_by_code = state_from_lgd(matcher, r["state_lgd_in"])
+                district_by_code = district_from_lgd(matcher, r["district_lgd_in"], state_lgd_code=r["state_lgd_in"] or None)
+
+                # Prefer user-provided state name; else use state name from state LGD code; else blank
+                state_name_raw = (r["state_name_in"] or (state_by_code["state_name"] if state_by_code else "")).strip()
+                district_name_raw = (r["district_name_in"] or (district_by_code["district_name"] if district_by_code else "")).strip()
+
+                df = pd.DataFrame([{
+                    "id": r["id"],
+                    "state_name_raw": state_name_raw,
+                    "district_name_raw": district_name_raw,
+                }], dtype=str)
+                res = matcher.match_dataframe(df).iloc[0].to_dict()
+
+                # If user provided LGD codes, verify them and surface as guidance fields
+                res["state_lgd_input"] = r["state_lgd_in"] or None
+                res["district_lgd_input"] = r["district_lgd_in"] or None
+                res["state_lgd_input_valid"] = bool(state_by_code) if r["state_lgd_in"] else None
+                res["district_lgd_input_valid"] = bool(district_by_code) if r["district_lgd_in"] else None
+                if district_by_code and state_by_code and str(district_by_code["state_lgd_code"]) != str(state_by_code["state_lgd_code"]):
+                    res["district_state_mismatch"] = True
+                else:
+                    res["district_state_mismatch"] = False if (district_by_code and state_by_code) else None
+
+                outputs.append(res)
+
+                if show_suggestions:
+                    sc_best = res.get("state_lgd_code")
+                    if r["state_name_in"]:
+                        for s in matcher.suggest_states(r["state_name_in"], limit=top_n):
+                            sugg_rows.append({"id": r["id"], "type": "STATE", **s})
+                    if r["district_name_in"]:
+                        if sc_best:
+                            for d in matcher.suggest_districts(r["district_name_in"], state_lgd_code=sc_best, limit=top_n):
+                                sugg_rows.append({"id": r["id"], "type": "DISTRICT_IN_STATE", **d})
+                        for d in matcher.suggest_districts(r["district_name_in"], state_lgd_code=None, limit=top_n):
+                            sugg_rows.append({"id": r["id"], "type": "DISTRICT_ANY_STATE", **d})
+
+            out_df = pd.DataFrame(outputs)
+            st.markdown("### Results")
+            st.dataframe(out_df, use_container_width=True, height=320)
+
+            if show_suggestions and sugg_rows:
+                st.divider()
+                st.markdown("### Suggestions (for user decision)")
+                st.dataframe(pd.DataFrame(sugg_rows), use_container_width=True, height=360)
+
+        st.divider()
+        st.subheader("List all districts of a state")
+        st.caption("Enter state name/alias or LGD code. Example: `up` or `9`.")
+        list_state = st.text_input("State for district list", key="list_state_quick")
+        if list_state.strip():
+            sm = matcher.match_state(list_state.strip())
+            sc = sm.get("state_lgd_code")
+            if sc is None:
+                st.warning("State not found.")
+                if show_suggestions:
+                    st.dataframe(pd.DataFrame(matcher.suggest_states(list_state, limit=top_n)), use_container_width=True, height=220)
+            else:
+                dlist = matcher.list_districts(str(sc))
+                st.caption(f"State: **{sm.get('state_name_corrected')}** (LGD {sc}) | Districts: {len(dlist)}")
+                st.dataframe(pd.DataFrame(dlist), use_container_width=True, height=320)
 
 with tab1:
     col1, col2 = st.columns(2)
@@ -129,8 +309,12 @@ with tab1:
             mapped_df["id"] = raw_df[id_col].astype(str)
 
         with st.expander("Preview mapped columns"):
+            preview_cols = []
+            if "id" in mapped_df.columns:
+                preview_cols.append("id")
+            preview_cols += [c for c in ["state_name_raw", "district_name_raw"] if c in mapped_df.columns]
             st.dataframe(
-                mapped_df[["id"] + [c for c in ["state_name_raw","district_name_raw"] if c in mapped_df.columns]].head(10),
+                mapped_df[preview_cols].head(10),
                 use_container_width=True
             )
 
