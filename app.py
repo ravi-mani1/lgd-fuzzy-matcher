@@ -148,6 +148,26 @@ def district_from_lgd(matcher: LGDMatcher, district_lgd_code: str, state_lgd_cod
         "state_lgd_code": str(r["state_lgd_code"]).strip(),
     }
 
+def list_districts_safe(matcher: LGDMatcher, state_lgd_code: str) -> list[dict]:
+    sc = str(state_lgd_code).strip() if state_lgd_code is not None else ""
+    if not sc:
+        return []
+    list_fn = getattr(matcher, "list_districts", None)
+    if callable(list_fn):
+        st.session_state["district_list_fallback_used"] = False
+        return list_fn(sc)
+    st.session_state["district_list_fallback_used"] = True
+    df = getattr(matcher, "district_df", None)
+    if df is None:
+        return []
+    ddf = df.copy()
+    ddf["state_lgd_code"] = ddf["state_lgd_code"].astype(str).str.strip()
+    ddf["district_lgd_code"] = ddf["district_lgd_code"].astype(str).str.strip()
+    ddf["district_name"] = ddf["district_name"].astype(str).str.strip()
+    ddf = ddf[(ddf["state_lgd_code"] == sc) & (ddf["district_lgd_code"] != "") & (ddf["district_name"] != "")]
+    ddf = ddf[["district_lgd_code", "district_name"]].drop_duplicates().sort_values(["district_name", "district_lgd_code"])
+    return ddf.to_dict(orient="records")
+
 with tab0:
     st.subheader("Quick Validate")
     st.caption("Fill any 1–4 fields. You can enter multiple values separated by commas.")
@@ -231,7 +251,9 @@ with tab0:
                 if show_suggestions:
                     st.dataframe(pd.DataFrame(matcher.suggest_states(list_state, limit=top_n)), use_container_width=True, height=220)
             else:
-                dlist = matcher.list_districts(str(sc))
+                dlist = list_districts_safe(matcher, str(sc))
+                if st.session_state.get("district_list_fallback_used"):
+                    st.info("Using compatibility district listing mode (matcher method unavailable in this runtime).")
                 st.caption(f"State: **{sm.get('state_name_corrected')}** (LGD {sc}) | Districts: {len(dlist)}")
                 st.dataframe(pd.DataFrame(dlist), use_container_width=True, height=320)
 
