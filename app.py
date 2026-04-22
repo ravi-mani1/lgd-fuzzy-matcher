@@ -10,6 +10,27 @@ from utils import generate_sql_update, load_config
 
 st.set_page_config(page_title="LGD Fuzzy Matcher", page_icon="🗺️", layout="wide")
 
+st.markdown("""
+<style>
+    .main .block-container {padding-top: 1.4rem; padding-bottom: 1.8rem;}
+    .app-hero {
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        padding: 0.9rem 1rem;
+        background: #f8fafc;
+        margin-bottom: 1rem;
+    }
+    .section-card {
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        padding: 0.75rem 0.9rem;
+        background: #ffffff;
+        margin-bottom: 0.9rem;
+    }
+    .small-muted {color: #6b7280; font-size: 0.9rem;}
+</style>
+""", unsafe_allow_html=True)
+
 @st.cache_resource(show_spinner="Building indices...")
 def get_matcher_from_bytes(state_bytes: bytes, district_bytes: bytes) -> LGDMatcher:
     m = LGDMatcher(config_path="config.json")
@@ -49,13 +70,18 @@ with st.sidebar:
     low_t    = st.slider("LOW >= ",    40, 74, 60)
     sql_table = st.text_input("SQL Table Name", "target_table")
     st.divider()
-    st.subheader("Quick options")
+    st.subheader("Quick Options")
     top_n = st.slider("Suggestions: top N", 1, 10, 5)
     show_suggestions = st.checkbox("Show suggestions", value=True)
 
 
 st.title("🗺️ LGD Fuzzy Matching System")
-st.markdown("Map raw state/district names → **official LGD codes** with confidence scoring.")
+st.markdown("""
+<div class="app-hero">
+  <strong>Map raw state and district names to official LGD codes</strong><br/>
+  <span class="small-muted">Use Quick Validate for spot checks, then run bulk mapping from Upload & Match.</span>
+</div>
+""", unsafe_allow_html=True)
 
 tab0, tab1, tab2, tab3 = st.tabs(["🔎 Quick Validate", "📤 Upload & Match", "📊 Results & Download", "📖 Help"])
 
@@ -275,6 +301,14 @@ with tab0:
 
             out_df = pd.DataFrame(outputs)
             st.markdown("### Results")
+            if not out_df.empty and "match_status" in out_df.columns:
+                c1, c2, c3, c4, c5 = st.columns(5)
+                counts = out_df["match_status"].value_counts()
+                c1.metric("EXACT", int(counts.get("EXACT", 0)))
+                c2.metric("HIGH", int(counts.get("HIGH_CONFIDENCE", 0)))
+                c3.metric("MEDIUM", int(counts.get("MEDIUM_CONFIDENCE", 0)))
+                c4.metric("LOW", int(counts.get("LOW_CONFIDENCE", 0)))
+                c5.metric("NOT FOUND", int(counts.get("NOT_FOUND", 0)))
             st.dataframe(out_df, use_container_width=True, height=320)
 
             if show_suggestions and sugg_rows:
@@ -306,6 +340,7 @@ with tab0:
                 st.dataframe(pd.DataFrame(dlist), use_container_width=True, height=320)
 
 with tab1:
+    st.markdown('<div class="section-card"><strong>Bulk Upload Workflow</strong><br/><span class="small-muted">1) Upload file  2) Map columns  3) Run LGD matching  4) Download output</span></div>', unsafe_allow_html=True)
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Upload Input File")
