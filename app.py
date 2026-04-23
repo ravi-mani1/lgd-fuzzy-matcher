@@ -5,6 +5,8 @@ Run: streamlit run app.py
 import io, os, time
 import json
 import hmac
+import base64
+import hashlib
 from collections.abc import Mapping
 import pandas as pd
 import streamlit as st
@@ -60,10 +62,67 @@ def _load_auth_users() -> dict[str, str]:
             pass
     return users
 
+def _load_auth_token_secret() -> str:
+    try:
+        secret = str(st.secrets.get("auth_token_secret", "")).strip()
+        if secret:
+            return secret
+    except Exception:
+        pass
+    return os.getenv("LGD_AUTH_TOKEN_SECRET", "").strip()
+
+def _token_encode(payload: dict, secret: str) -> str:
+    raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    body = base64.urlsafe_b64encode(raw).decode("ascii")
+    sig = hmac.new(secret.encode("utf-8"), body.encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"{body}.{sig}"
+
+def _token_decode(token: str, secret: str) -> dict | None:
+    if not token or "." not in token:
+        return None
+    body, sig = token.rsplit(".", 1)
+    expected = hmac.new(secret.encode("utf-8"), body.encode("utf-8"), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, expected):
+        return None
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(body.encode("ascii")).decode("utf-8"))
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    exp = payload.get("exp")
+    user = payload.get("user")
+    if not isinstance(exp, (int, float)) or not isinstance(user, str):
+        return None
+    if time.time() > float(exp):
+        return None
+    return payload
+
+def _try_restore_auth_from_token(users: dict[str, str]) -> bool:
+    if st.session_state.get("auth_ok"):
+        return True
+    token = st.query_params.get("auth_token")
+    if not token:
+        return False
+    secret = _load_auth_token_secret()
+    if not secret:
+        return False
+    payload = _token_decode(str(token), secret)
+    if not payload:
+        return False
+    user = str(payload["user"]).strip()
+    if user not in users:
+        return False
+    st.session_state["auth_ok"] = True
+    st.session_state["auth_user"] = user
+    return True
+
 def _render_auth_gate() -> None:
+    users = _load_auth_users()
+    if _try_restore_auth_from_token(users):
+        return
     if st.session_state.get("auth_ok"):
         return
-    users = _load_auth_users()
     st.title("🔐 Authorized Access")
     st.caption("Sign in to use the LGD Fuzzy Matcher.")
     if not users:
@@ -72,12 +131,23 @@ def _render_auth_gate() -> None:
     with st.form("login_form", clear_on_submit=False):
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
+        remember_me = st.checkbox("Remember me for 24 hours")
         submit = st.form_submit_button("Sign in", type="primary")
     if submit:
         expected = users.get(str(username).strip())
         if expected and hmac.compare_digest(str(password), expected):
             st.session_state["auth_ok"] = True
             st.session_state["auth_user"] = str(username).strip()
+            if remember_me:
+                secret = _load_auth_token_secret()
+                if secret:
+                    token = _token_encode({
+                        "user": str(username).strip(),
+                        "exp": int(time.time() + 24 * 3600),
+                    }, secret)
+                    st.query_params["auth_token"] = token
+                else:
+                    st.info("Set `auth_token_secret` in Streamlit secrets to enable persistent login.")
             st.success("Login successful.")
             st.rerun()
         st.error("Invalid username or password.")
@@ -116,6 +186,7 @@ with st.sidebar:
     if st.button("Sign out", use_container_width=True):
         st.session_state["auth_ok"] = False
         st.session_state["auth_user"] = ""
+        st.query_params.clear()
         st.rerun()
     st.caption("Indian Local Government Directory")
     st.divider()
@@ -328,6 +399,11 @@ with tab0:
                 # Resolve from LGD codes if provided (these are exact validations)
                 state_by_code = state_from_lgd(matcher, r["state_lgd_in"])
                 district_by_code = district_from_lgd(matcher, r["district_lgd_in"], state_lgd_code=r["state_lgd_in"] or None)
+                inferred_state_from_district = None
+                if district_by_code and not state_by_code:
+                    inferred_state_from_district = state_from_lgd(matcher, district_by_code.get("state_lgd_code"))
+                    if inferred_state_from_district:
+                        state_by_code = inferred_state_from_district
 
                 # Prefer user-provided state name; else use state name from state LGD code; else blank
                 state_name_raw = (r["state_name_in"] or (state_by_code["state_name"] if state_by_code else "")).strip()
@@ -349,6 +425,15 @@ with tab0:
                     res["district_state_mismatch"] = True
                 else:
                     res["district_state_mismatch"] = False if (district_by_code and state_by_code) else None
+
+                # If LGD codes are valid, treat them as authoritative and lock exact output.
+                if district_by_code and state_by_code and not res.get("district_state_mismatch"):
+                    res["state_lgd_code"] = state_by_code["state_lgd_code"]
+                    res["state_name_corrected"] = state_by_code["state_name"]
+                    res["district_lgd_code"] = district_by_code["district_lgd_code"]
+                    res["district_name_corrected"] = district_by_code["district_name"]
+                    res["match_confidence_score"] = 100.0
+                    res["match_status"] = "EXACT"
 
                 outputs.append(res)
 
