@@ -5,6 +5,7 @@ Run: streamlit run app.py
 import io, os, time
 import json
 import hmac
+from collections.abc import Mapping
 import pandas as pd
 import streamlit as st
 from matcher import LGDMatcher
@@ -37,7 +38,7 @@ def _load_auth_users() -> dict[str, str]:
     users: dict[str, str] = {}
     try:
         secret_users = st.secrets.get("auth_users", {})
-        if isinstance(secret_users, dict):
+        if isinstance(secret_users, Mapping):
             for k, v in secret_users.items():
                 u = str(k).strip()
                 p = str(v).strip()
@@ -49,7 +50,7 @@ def _load_auth_users() -> dict[str, str]:
     if env_json:
         try:
             parsed = json.loads(env_json)
-            if isinstance(parsed, dict):
+            if isinstance(parsed, Mapping):
                 for k, v in parsed.items():
                     u = str(k).strip()
                     p = str(v).strip()
