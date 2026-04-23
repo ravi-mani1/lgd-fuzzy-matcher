@@ -84,6 +84,7 @@ def _render_auth_gate() -> None:
     st.stop()
 
 _render_auth_gate()
+is_admin_user = st.session_state.get("auth_user") == "admin"
 
 @st.cache_resource(show_spinner="Building indices...")
 def get_matcher_from_bytes(state_bytes: bytes, district_bytes: bytes) -> LGDMatcher:
@@ -119,9 +120,14 @@ with st.sidebar:
     st.caption("Indian Local Government Directory")
     st.divider()
     st.subheader("Master Data Source")
-    state_up = st.file_uploader("State master CSV",    type="csv", key="su")
-    dist_up  = st.file_uploader("District master CSV", type="csv", key="du")
-    use_local = st.checkbox("Use local CSVs", value=True)
+    if not is_admin_user:
+        st.info("Only `admin` can change master data source settings.")
+    state_up = st.file_uploader("State master CSV",    type="csv", key="su", disabled=not is_admin_user)
+    dist_up  = st.file_uploader("District master CSV", type="csv", key="du", disabled=not is_admin_user)
+    use_local = st.checkbox("Use local CSVs", value=True, disabled=not is_admin_user)
+    if not is_admin_user:
+        # Enforce read-only data source behavior for non-admin users.
+        use_local = True
     st.divider()
     st.subheader("Thresholds")
     high_t   = st.slider("HIGH >= ",   80, 99, 90)
