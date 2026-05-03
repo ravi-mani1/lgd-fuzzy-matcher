@@ -1,6 +1,8 @@
-﻿__pycache__/
+__pycache__/
 *.pyc
+*.pyo
 *.log
+debug-*.log
 lgd_matcher.log
 lgd_matched_output.csv
 lgd_unmatched.csv
@@ -8,3 +10,16 @@ lgd_updates.sql
 tmp_sql_export.sql
 .env
 venv/
+.venv/
+*.egg-info/
+dist/
+build/
+.streamlit/secrets.toml
+.pytest_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+SUBDISTRICT_DISTRICT.csv
+VILLAGE_SUBDISTRICT.csv
+lgd_master.db
