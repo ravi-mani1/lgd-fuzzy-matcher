@@ -1,0 +1,10 @@
+venv/
+.venv/
+__pycache__/
+.git/
+.pytest_cache/
+*.db
+lgd_matcher.log
+lgd_updates.sql
+lgd_matched_output.csv
+lgd_unmatched.csv

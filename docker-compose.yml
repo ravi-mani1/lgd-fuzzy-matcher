@@ -8,8 +8,6 @@ services:
     env_file: .env
     environment:
       - LGD_API_URL=http://api:8000
-    volumes:
-      - ./lgd_master.db:/app/lgd_master.db:ro
 
   api:
     build: .
@@ -17,5 +15,3 @@ services:
     ports:
       - "8000:8000"
     env_file: .env
-    volumes:
-      - ./lgd_master.db:/app/lgd_master.db:ro

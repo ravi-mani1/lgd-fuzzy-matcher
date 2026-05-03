@@ -7,7 +7,10 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code and data
-COPY *.py *.json *.csv ./
+COPY . .
+
+# Build the SQLite database during image creation to avoid volume issues
+RUN python build_db.py && rm -f *.zip
 
 EXPOSE 8501 8000
 
