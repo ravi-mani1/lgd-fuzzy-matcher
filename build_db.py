@@ -35,8 +35,9 @@ def build_db(db_path: str = "lgd_master.db"):
     
     # Process Sub-districts
     print("Loading Sub-districts...")
-    if Path("SUBDISTRICT_DISTRICT.csv").exists():
-        df_subdist = pd.read_csv("SUBDISTRICT_DISTRICT.csv", dtype=str).fillna("")
+    subdist_file = "SUBDISTRICT_DISTRICT.zip" if Path("SUBDISTRICT_DISTRICT.zip").exists() else "SUBDISTRICT_DISTRICT.csv"
+    if Path(subdist_file).exists():
+        df_subdist = pd.read_csv(subdist_file, dtype=str).fillna("")
         df_subdist = df_subdist.rename(columns={
             "subdistrict_lgd": "subdistrict_lgd_code", "district_lgd": "district_lgd_code",
             "state_lgd": "state_lgd_code",
@@ -52,9 +53,10 @@ def build_db(db_path: str = "lgd_master.db"):
         
     # Process Villages
     print("Loading Villages (this may take a minute)...")
-    if Path("VILLAGE_SUBDISTRICT.csv").exists():
+    village_file = "VILLAGE_SUBDISTRICT.zip" if Path("VILLAGE_SUBDISTRICT.zip").exists() else "VILLAGE_SUBDISTRICT.csv"
+    if Path(village_file).exists():
         # Read in chunks to save memory during build, though pandas can probably handle 50MB
-        df_village = pd.read_csv("VILLAGE_SUBDISTRICT.csv", dtype=str).fillna("")
+        df_village = pd.read_csv(village_file, dtype=str).fillna("")
         df_village = df_village.rename(columns={
             "village_lgd": "village_lgd_code", "subdistrict_lgd": "subdistrict_lgd_code",
             "district_lgd": "district_lgd_code", "state_lgd": "state_lgd_code",
