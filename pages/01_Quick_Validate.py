@@ -42,28 +42,48 @@ if run_quick:
     
     # We will build a DataFrame and send to API
     df_rows = []
+    lookup_warnings = []
     for r in rows:
+        state_name = r["state_name_in"] or ""
+        state_lgd = r["state_lgd_in"] or ""
+        district_name = r["district_name_in"] or ""
+        district_lgd = r["district_lgd_in"] or ""
+
+        if state_lgd:
+            state_hit = api_client.lookup_state(state_lgd)
+            if state_hit:
+                state_name = state_name or state_hit["state_name"]
+                state_lgd = state_hit["state_lgd_code"]
+            else:
+                lookup_warnings.append(f"State LGD code {state_lgd} was not found.")
+
+        if district_lgd:
+            district_hit = api_client.lookup_district(district_lgd, state_lgd)
+            if district_hit:
+                district_name = district_name or district_hit["district_name"]
+                state_lgd = state_lgd or district_hit["state_lgd_code"]
+                if not state_name and state_lgd:
+                    state_hit = api_client.lookup_state(state_lgd)
+                    if state_hit:
+                        state_name = state_hit["state_name"]
+            else:
+                lookup_warnings.append(f"District LGD code {district_lgd} was not found.")
+
         row_data = {
             "id": r["id"],
-            "state_name_raw": r["state_name_in"] or "",
-            "district_name_raw": r["district_name_in"] or "",
+            "state_name_raw": state_name,
+            "district_name_raw": district_name,
             "subdistrict_name_raw": r["subdist_name_in"] or "",
             "village_name_raw": r["village_name_in"] or ""
         }
-        # If LGD code was passed instead of name, we can just send it as name and let fuzzy matcher sort it out,
-        # or we should probably resolve it. For simplicity, just use the api_client.match_dataframe
-        # Wait, the API doesn't accept LGD codes as input currently, it only takes raw names!
-        # Let's just put the LGD code in the raw name field if name is empty, our matcher is smart enough.
-        if not row_data["state_name_raw"] and r["state_lgd_in"]:
-            row_data["state_name_raw"] = f"LGD {r['state_lgd_in']}" # Fallback
-        if not row_data["district_name_raw"] and r["district_lgd_in"]:
-            row_data["district_name_raw"] = f"LGD {r['district_lgd_in']}"
             
         df_rows.append(row_data)
 
     if not df_rows:
         st.warning("No input provided.")
     else:
+        for msg in lookup_warnings:
+            st.warning(msg)
         df = pd.DataFrame(df_rows)
         with st.spinner("Matching via API..."):
             try:

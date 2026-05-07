@@ -30,6 +30,20 @@ class TestStats:
         assert "districts" in data
 
 
+class TestLookups:
+    def test_lookup_state(self, client: TestClient):
+        r = client.get("/lookup/state", params={"state_lgd": "9"})
+        assert r.status_code == 200
+        assert r.json()["state_name"] == "Uttar Pradesh"
+
+    def test_lookup_district(self, client: TestClient):
+        r = client.get("/lookup/district", params={"district_lgd": "187"})
+        assert r.status_code == 200
+        data = r.json()
+        assert data["district_name"] == "Varanasi"
+        assert data["state_lgd_code"] == "9"
+
+
 class TestMatch:
     def test_single_record(self, client: TestClient):
         r = client.post("/match", json={

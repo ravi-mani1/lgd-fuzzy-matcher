@@ -39,6 +39,14 @@ if USE_LOCAL_MATCHER:
         if not str(subdistrict_lgd).strip(): return []
         return get_matcher().list_villages(subdistrict_lgd)
 
+    def lookup_state(state_lgd: str) -> Optional[Dict]:
+        if not str(state_lgd).strip(): return None
+        return get_matcher().get_state_by_lgd(state_lgd)
+
+    def lookup_district(district_lgd: str, state_lgd: Optional[str] = None) -> Optional[Dict]:
+        if not str(district_lgd).strip(): return None
+        return get_matcher().get_district_by_lgd(district_lgd, state_lgd)
+
     def suggest_states(q: str, limit: int = 5) -> List[Dict]:
         if not str(q).strip(): return []
         return get_matcher().suggest_states(q, limit)
@@ -91,6 +99,25 @@ else:
     def list_villages(subdistrict_lgd: str) -> List[Dict]:
         if not str(subdistrict_lgd).strip(): return []
         resp = requests.get(f"{API_BASE_URL}/list/villages", params={"subdistrict_lgd": subdistrict_lgd}, headers=_headers())
+        resp.raise_for_status()
+        return resp.json()
+
+    def lookup_state(state_lgd: str) -> Optional[Dict]:
+        if not str(state_lgd).strip(): return None
+        resp = requests.get(f"{API_BASE_URL}/lookup/state", params={"state_lgd": state_lgd}, headers=_headers())
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        return resp.json()
+
+    def lookup_district(district_lgd: str, state_lgd: Optional[str] = None) -> Optional[Dict]:
+        if not str(district_lgd).strip(): return None
+        params = {"district_lgd": district_lgd}
+        if state_lgd and str(state_lgd).strip():
+            params["state_lgd"] = state_lgd
+        resp = requests.get(f"{API_BASE_URL}/lookup/district", params=params, headers=_headers())
+        if resp.status_code == 404:
+            return None
         resp.raise_for_status()
         return resp.json()
 

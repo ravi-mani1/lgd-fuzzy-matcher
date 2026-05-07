@@ -96,6 +96,22 @@ class TestSuggestions:
         names = [d["district_name"] for d in districts]
         assert "New Delhi" in names
 
+    def test_lookup_state_by_lgd(self, matcher: LGDMatcher):
+        state = matcher.get_state_by_lgd("9")
+        assert state == {"state_lgd_code": "9", "state_name": "Uttar Pradesh"}
+
+    def test_lookup_district_by_lgd(self, matcher: LGDMatcher):
+        district = matcher.get_district_by_lgd("187")
+        assert district == {
+            "district_lgd_code": "187",
+            "district_name": "Varanasi",
+            "state_lgd_code": "9",
+        }
+
+    def test_lookup_district_by_lgd_scoped_to_state(self, matcher: LGDMatcher):
+        district = matcher.get_district_by_lgd("187", "9")
+        assert district["district_name"] == "Varanasi"
+
 
 class TestCacheDoesNotLeakMemory:
     def test_instance_cache_clears_on_rebuild(self):

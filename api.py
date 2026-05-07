@@ -152,6 +152,20 @@ def list_subdistricts(district_lgd: str):
 def list_villages(subdistrict_lgd: str):
     return get_matcher().list_villages(subdistrict_lgd)
 
+@app.get("/lookup/state", dependencies=[Depends(verify_api_key)])
+def lookup_state(state_lgd: str):
+    rec = get_matcher().get_state_by_lgd(state_lgd)
+    if rec is None:
+        raise HTTPException(404, "State LGD code not found.")
+    return rec
+
+@app.get("/lookup/district", dependencies=[Depends(verify_api_key)])
+def lookup_district(district_lgd: str, state_lgd: Optional[str] = None):
+    rec = get_matcher().get_district_by_lgd(district_lgd, state_lgd)
+    if rec is None:
+        raise HTTPException(404, "District LGD code not found.")
+    return rec
+
 @app.get("/suggest/states", dependencies=[Depends(verify_api_key)])
 def suggest_states(q: str, limit: int = 5):
     return get_matcher().suggest_states(q, limit)

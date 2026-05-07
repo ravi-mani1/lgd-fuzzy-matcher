@@ -6,10 +6,39 @@ import json
 import os
 import time
 from collections.abc import Mapping
+from urllib.parse import urlparse
 
 import streamlit as st
 
 from utils import verify_password
+
+
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+
+
+def _hostname_from_host_header(host: str) -> str:
+    host = str(host or "").strip()
+    if not host:
+        return ""
+    if host.startswith("[") and "]" in host:
+        return host[1:host.index("]")].lower()
+    parsed = urlparse(f"//{host}")
+    return (parsed.hostname or "").lower()
+
+
+def _is_localhost_host(host: str) -> bool:
+    return _hostname_from_host_header(host) in _LOCAL_HOSTS
+
+
+def _is_localhost_request() -> bool:
+    if os.getenv("LGD_REQUIRE_AUTH_ON_LOCALHOST", "").strip().lower() == "true":
+        return False
+    try:
+        headers = getattr(st.context, "headers", {}) or {}
+        host = headers.get("host", "")
+    except Exception:
+        host = ""
+    return _is_localhost_host(host)
 
 
 def load_auth_users() -> dict[str, str]:
@@ -104,6 +133,10 @@ def _try_restore_auth_from_token(users: dict[str, str]) -> bool:
 
 def render_auth_gate() -> None:
     """Show the login form and block execution until the user signs in."""
+    if _is_localhost_request():
+        st.session_state["auth_ok"] = True
+        st.session_state["auth_user"] = "localhost"
+        return
     users = load_auth_users()
     if _try_restore_auth_from_token(users):
         return

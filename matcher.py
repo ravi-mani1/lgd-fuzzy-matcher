@@ -293,6 +293,44 @@ class LGDMatcher:
         )
         return df.to_dict(orient="records")
 
+    def get_state_by_lgd(self, state_lgd_code: str) -> dict | None:
+        if self.state_df is None:
+            raise RuntimeError("Master data not loaded. Call load_master_from_csv/load_master_from_mysql first.")
+        sc = "" if is_blank(state_lgd_code) else str(state_lgd_code).strip()
+        if not sc:
+            return None
+        df = self.state_df.copy()
+        df["state_lgd_code"] = df["state_lgd_code"].astype(str).str.strip()
+        df["state_name"] = df["state_name"].astype(str).str.strip()
+        hit = df[(df["state_lgd_code"] == sc) & (df["state_name"] != "")]
+        if hit.empty:
+            return None
+        rec = hit.iloc[0]
+        return {"state_lgd_code": str(rec["state_lgd_code"]), "state_name": str(rec["state_name"])}
+
+    def get_district_by_lgd(self, district_lgd_code: str, state_lgd_code: str | None = None) -> dict | None:
+        if self.district_df is None:
+            raise RuntimeError("Master data not loaded. Call load_master_from_csv/load_master_from_mysql first.")
+        dc = "" if is_blank(district_lgd_code) else str(district_lgd_code).strip()
+        if not dc:
+            return None
+        df = self.district_df.copy()
+        df["district_lgd_code"] = df["district_lgd_code"].astype(str).str.strip()
+        df["district_name"] = df["district_name"].astype(str).str.strip()
+        df["state_lgd_code"] = df["state_lgd_code"].astype(str).str.strip()
+        hit = df[(df["district_lgd_code"] == dc) & (df["district_name"] != "")]
+        sc = "" if is_blank(state_lgd_code) else str(state_lgd_code).strip()
+        if sc:
+            hit = hit[hit["state_lgd_code"] == sc]
+        if hit.empty:
+            return None
+        rec = hit.iloc[0]
+        return {
+            "district_lgd_code": str(rec["district_lgd_code"]),
+            "district_name": str(rec["district_name"]),
+            "state_lgd_code": str(rec["state_lgd_code"]),
+        }
+
     # ------------------------------------------------------------------
     # Scoring
     # ------------------------------------------------------------------
@@ -885,4 +923,3 @@ class LGDMatcher:
         # Only include columns that exist
         out = [c for c in out if c in data.columns]
         return data[out].copy()
-
